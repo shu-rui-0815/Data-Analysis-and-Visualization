@@ -1,0 +1,394 @@
+---
+title: "DAV癌症發生統計"
+author: "Cindy & Abby"
+date: "2025-01-01"
+output: 
+  flexdashboard::flex_dashboard:
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+cancer_data <- read.csv("cancer.csv")
+library(dplyr)
+library(wordcloud2)
+library(ggplot2)
+library(htmlwidgets)
+library(plotly)
+library(knitr)
+library(gifski)
+library(gganimate)
+library(kableExtra)
+library(reshape2)
+library(sf)
+library(lubridate)
+
+options(knitr.table.format = "html")
+```
+
+資料集介紹
+===
+
+<div style="font-size:24px;"> 
+**本資料集為我國1979年至2021年間癌症發生統計之數據，筆數總計92465筆，其中統計欄位包含癌症診斷年、性別、縣市、癌症類別、發生數、發生率、平均年齡等。**<br>
+</div>
+
+台灣癌症資料集來源：      https://data.gov.tw/dataset/6399  <br>
+台灣地圖資料集來源：    https://gadm.org/download_country.html
+
+
+
+地圖
+===
+column 1{.tabset .tabset-fade}
+---
+### 台灣各縣市癌症總發生數地圖
+```{r}
+taiwan_cancer <- cancer_data %>% 
+  select(癌症診斷年,縣市別, 癌症別,癌症發生數, 性別) %>% 
+  filter(縣市別 != "全國" , 性別 == "全" ) %>% 
+  group_by(縣市別 ) %>%
+  summarise(總發生數 = sum(癌症發生數))
+  
+taiwan_shp <- st_read("C:/Users/User/Downloads/gadm41_TWN_shp/gadm41_TWN_2.shp", quiet = TRUE)
+taiwan_map <- fortify(as(taiwan_shp, "Spatial"))
+chinese_name <- c("金門縣", "連江縣", "高雄市",
+                  "新北市", "臺中市", "臺南市", "臺北市",
+                  "彰化縣", "嘉義市", "嘉義縣","新竹市",
+                  "新竹縣", "花蓮縣", "基隆市", "苗栗縣",
+                  "南投縣", "澎湖縣", "屏東縣","臺東縣", "桃園市",
+                  "宜蘭縣", "雲林縣")
+
+mydata <- data.frame(NAME_1=taiwan_shp$NAME_2,
+                     NAME_2=chinese_name,
+                     shpid=taiwan_shp$GID_2,
+                     id=seq(1,22))
+
+
+taiwan_cancer$縣市別 <- as.character(taiwan_cancer$縣市別)
+taiwan_cancer["縣市別"][taiwan_cancer["縣市別"] == "台北市"] <- "臺北市"
+taiwan_cancer["縣市別"][taiwan_cancer["縣市別"] == "台南市"] <- "臺南市"
+taiwan_cancer["縣市別"][taiwan_cancer["縣市別"] == "台東縣"] <- "臺東縣"
+taiwan_cancer["縣市別"][taiwan_cancer["縣市別"] == "台中市"] <- "臺中市"
+
+UData <- merge(mydata, taiwan_cancer,  by.x = "NAME_2", by.y = "縣市別")
+taiwan_map$id <- as.character(as.integer(taiwan_map$id))
+final.plotdata<-merge(taiwan_map,UData,by="id",all.x=T)
+
+Taiwan <- final.plotdata %>% 
+  arrange(id,order) %>% 
+  ggplot() +
+  geom_polygon(
+  aes(x = long, y = lat, group = group, 
+        fill = NAME_2,
+        text = paste0("縣市別: ", NAME_2, "<br>",
+                      "癌症總發生數: ",總發生數)), 
+    color = "black",size = 0.25) + 
+  coord_map()+#維持地圖比例
+  #scale_fill_gradientn(colours = brewer.pal(9,"Reds"), name = "")+
+  #theme_void()+
+  labs(title="台灣各縣市癌症總發生數")+
+  theme(legend.position = "none",
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+
+map <- ggplotly(Taiwan, tooltip = "text")
+
+map
+
+```
+
+### Data {.columns}
+<div style="display: flex; justify-content: space-between;">
+  <div style="width: 33%;">
+#### 初始資料：各縣市癌症總發生數
+<br>
+```{r}
+kable(taiwan_cancer) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+  </div>
+  <div style="width: 33%;">
+#### 初始資料：地圖模型
+<br>
+```{r}
+kable(mydata) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+ </div>
+   <div style="width: 33%;">
+#### 合併資料
+將2筆初始資料根據NAME_2(縣市別)合併處理
+```{r}
+kable(UData) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+ </div>
+</div>
+
+
+
+排行榜
+===
+column 1{.tabset .tabset-fade}
+---
+### 1979~2021年國人10大癌症別排行榜
+```{r}
+year_occurrences <- cancer_data %>% 
+  select(癌症診斷年,縣市別, 癌症別,癌症發生數, 性別) %>% 
+  filter(縣市別 == "全國" , 性別 == "全") %>% 
+  select(癌症診斷年,癌症別,癌症發生數) %>% 
+  filter(癌症別 != "全癌症") %>% 
+  group_by(癌症診斷年) %>% 
+  arrange(癌症診斷年, -癌症發生數) %>% 
+  mutate(rank = 1:n()) %>% 
+  filter(rank <= 10)
+
+POP_Plot <- ggplot(data = year_occurrences,
+                   aes(fill = 癌症別)) +
+  aes(xmin = 0,
+      xmax = 癌症發生數 /10) +
+  aes(ymin = rank - .45,
+      ymax = rank + .45,
+      y = rank) +
+  facet_wrap(~ 癌症診斷年, ncol=3) +
+  geom_rect(alpha = 0.7) +
+  scale_x_continuous(
+    limits = c(-1000, 1900), 
+    breaks = c(0, 400, 800, 1200, 1600)) +
+  geom_text(col = "gray13",
+            hjust = "right",
+            aes(label = 癌症別),
+            x = -50,
+            size = 7) +
+  scale_y_reverse() +
+  labs(fill = NULL) +
+  labs(x = 'Population') +
+  labs(y = "") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+show_rank <- POP_Plot +
+  facet_null() +
+  geom_text(x = 1300, y = -10,
+            family = "Times",
+            aes(label = as.character(癌症診斷年)),
+            size = 30, col = "grey18") +
+  gganimate::transition_time(癌症診斷年) 
+
+```
+![](./year_occurrences.gif)
+
+### Data
+```{r}
+kable(year_occurrences) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+
+
+文字雲
+===
+## column 1
+### Data
+```{r}
+occurrences <- cancer_data %>% 
+  select(癌症診斷年,縣市別, 癌症別,癌症發生數, 性別) %>% 
+  filter(縣市別 == "全國" , 性別 == "全") %>% 
+  group_by(癌症別) %>%
+  filter(癌症別 %in% c("口腔、口咽及下咽","不明原發部位","甲狀腺","白血病","皮膚","肝及肝內膽管","肺、支氣管及氣管","非何杰金氏淋巴瘤","胃","食道","胰","結直腸","膀胱","鼻咽")) %>% 
+  summarise(總發生數 = sum(癌症發生數)) %>% 
+  filter(癌症別 != "全癌症") 
+
+kable(occurrences) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+
+## column 2
+### 癌症別發生數文字雲
+<div style="width: 100%; height: 860px; display: flex; justify-content: center; align-items: center;">
+```{r, echo=FALSE}
+  htmltools::includeHTML("wordcloud2_occurrences.html")
+```
+</div> `
+
+
+AGE
+===
+column 2{.tabset .tabset-fade}
+---
+### 全國歷年各癌症發生平均年齡
+```{r}
+
+age <- cancer_data %>% 
+  select(癌症診斷年,縣市別, 癌症別,平均年齡, 性別)%>% 
+  filter(縣市別 == "全國",
+         性別 == "全",
+         癌症別 %in% c("口腔、口咽及下咽", "甲狀腺", "皮膚", "結直腸", "肝及肝內膽管", "肺、支氣管及氣管", "胃", "膀胱", "食道"))
+
+cancer_age <- ggplot(age,
+                     mapping = aes(x=癌症診斷年, 
+                                   y=平均年齡,
+                                   colour = 癌症別)) +
+  facet_wrap(~ 癌症別, ncol=3) +
+  labs(title = "全國歷年各癌症發生平均年齡") +
+  geom_line()+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5),
+    legend.position = "none")
+
+cancer_age.inter <- ggplotly(cancer_age)
+
+cancer_age.inter
+```
+
+
+
+### Data
+```{r}
+kable(age) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+
+
+GENDER
+===
+column 2{.tabset .tabset-fade}
+---
+### 各癌症別性別比例
+```{r}
+Data2 <- cancer_data %>% 
+  select(縣市別,癌症別,癌症發生數,性別) %>% 
+  filter(縣市別 == "全國", 性別 != "全", 癌症別 %in% c("口腔、口咽及下咽", "甲狀腺", "皮膚", "結直腸", "肝及肝內膽管", "肺、支氣管及氣管", "胃", "膀胱", "食道")) %>% 
+  group_by(癌症別, 性別) %>% 
+  summarise(total = sum(癌症發生數, na.rm = TRUE)) %>% 
+  arrange(癌症別, desc(性別)) %>% 
+  mutate(pos = cumsum(total) - 0.5 * total)
+
+ggplot(Data2, mapping = aes(x = "", y = total, fill = 性別)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(mapping = aes(x = "", y = pos, label = sprintf("%d", total)),
+            size = 3, color = "black") +
+  scale_fill_manual(values = c("pink", "lightblue"),
+                    name = "性別",
+                    labels = c("女性", "男性")) +
+  coord_polar("y", start = pi / 2) +
+  labs(title = "各癌症別性別比例", x = NULL, y = NULL) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~ 癌症別, scales = "free_y")
+
+```
+
+### Data
+```{r}
+kable(Data2) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+
+
+TAIWAN
+===
+column 2{.tabset .tabset-fade}
+---
+### 全國歷年各癌症發生數
+```{r}
+Data <- cancer_data %>% 
+  select(癌症診斷年,縣市別,癌症別,癌症發生數,性別) %>% 
+  filter(縣市別 == "全國" , 性別 == "全",癌症別 %in% c("口腔、口咽及下咽", "甲狀腺", "皮膚", "結直腸", "肝及肝內膽管", "肺、支氣管及氣管", "胃", "膀胱", "食道")) 
+
+linechart <- ggplot(Data, mapping = aes(x = 癌症診斷年, y = 癌症發生數, color = 癌症別)) +
+  geom_line() +
+  facet_wrap(~ 癌症別, ncol = 3) + 
+  labs(title = "全國歷年各癌症發生數") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "none")
+
+linechart.inter <- ggplotly(linechart)
+linechart.inter
+
+```
+
+### Data
+```{r}
+kable(Data) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+
+
+
+CITY
+===
+column 2{.tabset .tabset-fade}
+---
+### 各縣市歷年癌症發生總數
+```{r}
+Data3 <- cancer_data %>% 
+  select(縣市別,癌症別,癌症發生數) %>% 
+  filter(縣市別 != "全國",癌症別 %in% c("口腔、口咽及下咽", "甲狀腺", "皮膚", "結直腸", "肝及肝內膽管", "肺、支氣管及氣管", "胃", "膀胱", "食道")) %>% 
+  group_by(癌症別,縣市別) %>% 
+  summarise(癌症發生總數 = sum(癌症發生數, na.rm = TRUE)) 
+
+barchart <- ggplot(Data3, 
+           mapping = aes(x = 縣市別, y = 癌症發生總數, fill = 縣市別)) +
+      geom_bar(stat = "identity") +
+      facet_wrap(~ 癌症別) +
+      labs(title = "不同縣市的歷年癌症發生總數",
+          x = "",
+          y = "癌症發生總數") +
+      theme_bw() +
+      theme(plot.title=element_text(hjust=0.5),
+            axis.text.y = element_text(angle = 45, hjust = 1),
+            axis.text.x = element_text(angle = 45, hjust = 1),
+            legend.position = "none")
+
+
+barchart.inter <- ggplotly(barchart)
+barchart.inter
+
+```
+
+### Data
+```{r}
+kable(Data3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F) %>% 
+  scroll_box(height = "860px")
+
+```
+
+總結
+===
+<div style="font-size:22px;"> 
+我們將這筆資料分析處理，透過圖表視覺化顯示我國1979年至2021年間的癌症發生趨勢、癌症發生統計、各數據間的比較，以及互動式地圖讓使用者移動游標就查看該縣市在42年間的癌症發生總數，根據這些分析結果與圖表視覺化，我們認為可以在以下三個面向加強對癌症的防治：<br><br>
+**1.加強癌症的檢驗與早期診療：**<br>
+根據全國各癌症發生平均年齡、各癌症發生性別比例，可以清楚看見不同癌症別的好發年齡、性別，加強對癌症的防範意識，透過定期檢查提高癌症的早期發生率。<br>
+**2.區域資源分配：**<br>
+根據台灣各縣市癌症發生數地圖、不同縣市癌症發生總數圖，可以查看不同縣市的歷年癌症發生總數，針對不同縣市發生癌症的狀況投入醫療資源與實施公共衛生措施，提供更好的資源分配。<br>
+**3.健康教育：**<br>
+從數據趨勢可見台灣罹患癌症的患者明顯上升，針對吸菸、喝酒、飲食習慣不佳等高風險因素，政府可以推廣更多的健康宣傳教育，鼓勵人民健康的生活、提高人民的健康意識。
+</div>

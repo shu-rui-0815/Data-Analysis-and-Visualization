@@ -8,7 +8,10 @@
 ### 作品展示
 **台灣癌症發生統計視覺化分析**
   * `資料來源`： 政府資料開放平台 (我國1979-2021年癌症發生統計)
-  * `作品描述`： 透過 PlotDB 製作熱圖呈現老齡人口分佈，進行分析並提出解決議題，結合 Gamma AI 生成情境圖，提出長者鋼琴共學的社會設計提案。
+  * `作品描述`：
+    1. GIS 地理分析：結合 Shapefile 繪製台灣各縣市癌症熱圖，觀察各縣市癌症發生總數。
+    2. 動態數據：製作 40 年間十大癌症排名的動態排行榜
+    3. 互動式探索：依據不同性別、年齡與癌症類型，查看其趨勢
   * `作品連結`： [Cancer_Data_Analysis_Project.html](https://shu-rui-0815.github.io/Data-Analysis-and-Visualization/Cancer_Data_Analysis_Project.html)
 
 
